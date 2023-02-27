@@ -1,0 +1,3 @@
+[submodule "generi.c"]
+	path = generi.c
+	url = git@github.com:Zayac-The-Engineer/generi.c.git
