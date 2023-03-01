@@ -13,28 +13,16 @@
     SerializeStruct_key(s, #field); \
     SerializeStruct_value(s, v->field);
 
-#define serde_struct(Name, ...)                                   \
-    typedef struct Name {                                         \
-        SerResult (*ser)(Serializer *, struct Name *);            \
-        FOREACH(GET_FIELD, __VA_ARGS__);                          \
-    } Name;                                                       \
-    enum { Name##_FIELDCOUNT = NUM_ARGS(__VA_ARGS__) };           \
-    SerResult serialize_##Name(Serializer *self, Name *v) {       \
-        SerializeStruct *s;                                       \
-        match(serialize_struct(self, #Name, Name##_FIELDCOUNT),   \
-              of(Ok, s),                                          \
-              of(Err, Error e) return (Err(SerResult, e)));       \
-        FOREACH(SERIALIZE_FIELD, FOREACH(GET_ENUM, __VA_ARGS__)); \
-        SerializeStruct_end(s);                                   \
-        return Ok(SerResult, {});                                 \
-    }
-
 /**
  * \def SERIALIZE_METHOD_HEADERS
+ * In serializer header
+ * `#define SerializeStruct_key(self, key)`
+ * `#define SerializeStruct_value(self, value)`
  * Before applying this macro
  * `typedef *your serializer type* Serializer`
  * `typedef Result({}, Error) SerResult;`
  * `typedef Result(SeqSerType, Error) SerSeqResult;`
+ * `typedef Result(SeqStructType, Error) SerStructResult;`
  */
 #define SERIALIZE_METHOD_HEADERS                                \
     SerResult serialize_bool(Serializer *self, bool v);         \
@@ -65,7 +53,7 @@
     SerResult serialize_default(Serializer *self, void *v);
 
 // clang-format off
-#define serialize(serializer, value, ...)    \
+#define serialize(serializer, value)    \
     _Generic((value),                        \
              int8_t   : serialize_int8_t,    \
              int16_t  : serialize_int16_t,   \
@@ -81,7 +69,6 @@
              bool     : serialize_bool,      \
              char *   : serialize_str,       \
              default  : serialize_default) (serializer, value)
-             /* __VA_OPT__(, default  : value.serialize)) (serializer, value) */
 // clang-format on
 
 #endif  // SERIALIZE_H_

@@ -1,7 +1,13 @@
 #include "json.h"
 
+#include <ctype.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <string.h>
 
+#include "deserialize.h"
+#include "error.h"
+#include "result.h"
 #include "sumtype.h"
 
 // Option for nice clang formatting for _Generic is only available in clang16
@@ -66,16 +72,6 @@ SerResult serialize_unit(Serializer *self) {
     return Ok(SerResult, {});
 }
 
-// NOTE: unimplemented
-// SerSeqResult serialize_seq(Serializer *self, OptSize len) {
-//     char buffer[BUFSIZ];
-//     sprintf(buffer, "[");
-//     String value = String_from_arr(buffer, strlen(buffer));
-//     self->output.append(&self->output, &value);
-//     value.impl.destroy(&value);
-//     return Ok(SerSeqResult, self);
-// }
-
 SerStructResult serialize_struct(Serializer *self, char *name, size_t len) {
     char buffer[BUFSIZ];
     sprintf(buffer, "{");
@@ -95,4 +91,84 @@ SerResult serialize_default(Serializer *self, void *v) {
         SerResult (*ser)(Serializer *, struct void_struct *);
     } *value = v;
     return value->ser(self, v);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+ResChar peek_char(Deserializer *self) {
+    if (self->input[0] == '\0') {
+        return Err(ResChar, Error("EOF"));
+    }
+    return Ok(ResChar, self->input[0]);
+}
+
+ResChar next_char(Deserializer *self) {
+    char ch;
+    TRY(ResChar, peek_char(self), ch);
+    self->input++;
+    return Ok(ResChar, ch);
+}
+
+ResBool parse_bool(Deserializer *self) {
+    if (strstr(self->input, "true") == self->input) {
+        self->input = self->input + strlen("true");
+        return Ok(ResBool, true);
+    } else if (strstr(self->input, "false") == self->input) {
+        self->input = self->input + strlen("false");
+        return Ok(ResBool, false);
+    }
+    return Err(ResBool, Error("Expected boolean"));
+}
+
+ResUint parse_unsigned(Deserializer *self) {
+    char ch;
+    do
+        TRY(ResUint, next_char(self), ch)
+    while (isspace(ch));
+    if (ch <= '0' || ch >= '9') {
+        return Err(ResUint, Error("Expected unsigned integer"));
+    }
+    uint64_t res = ch - '0';
+    while (true) {
+        ch = peek_char(self).body.Ok;
+        if (ch >= '0' && ch <= '9') {
+            TRY(ResUint, next_char(self));
+            res *= 10;
+            res += ch - '0';
+        } else {
+            return Ok(ResUint, res);
+        }
+    }
+}
+
+ResInt parse_signed(Deserializer *self) {
+    char ch;
+    do
+        TRY(ResInt, next_char(self), ch)
+    while (isspace(ch));
+    if ((ch <= '0' || ch >= '9') && ch != '-') {
+        return Err(ResInt, Error("Expected integer"));
+    }
+    int64_t res;
+    TRY(ResInt, parse_unsigned(self), res);
+    if (ch == '-') res = -res;
+    return Ok(ResInt, res);
+}
+
+// TODO: escape sequences
+ResStr parse_str(Deserializer *self) {
+    char ch;
+    do
+        TRY(ResStr, next_char(self), ch)
+    while (isspace(ch));
+    if (ch != '"') {
+        return Err(ResStr, Error("Expected string"));
+    }
+    char *end = strchr(self->input, '"');
+    if (end == NULL) {
+        return Err(ResStr, Error("Unterminated string"));
+    }
+    str res = {self->input, end - self->input};
+    self->input = end + 1;
+    return Ok(ResStr, res);
 }
