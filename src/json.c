@@ -14,7 +14,7 @@
 // Meanwhile I have clang15 and I don't feel like building from source
 // NOTE: maybe enable clang format when I get my hands on clang16
 // clang-format off
-#define primitive_impl(T, label, method_name)                   \
+#define ser_primitive_impl(T, method_name)                   \
     SerResult method_name(Serializer *self, T v) {              \
         char buffer[BUFSIZ];                                    \
         sprintf(buffer,                                         \
@@ -36,20 +36,20 @@
     }
 // clang-format on
 
-primitive_impl(int8_t, JsonNumber, serialize_int8_t);
-primitive_impl(int16_t, JsonNumber, serialize_int16_t);
-primitive_impl(int32_t, JsonNumber, serialize_int32_t);
-primitive_impl(int64_t, JsonNumber, serialize_int64_t);
+ser_primitive_impl(int8_t, serialize_int8);
+ser_primitive_impl(int16_t, serialize_int16);
+ser_primitive_impl(int32_t, serialize_int32);
+ser_primitive_impl(int64_t, serialize_int64);
 
-primitive_impl(uint8_t, JsonNumber, serialize_uint8_t);
-primitive_impl(uint16_t, JsonNumber, serialize_uint16_t);
-primitive_impl(uint32_t, JsonNumber, serialize_uint32_t);
-primitive_impl(uint64_t, JsonNumber, serialize_uint64_t);
+ser_primitive_impl(uint8_t, serialize_uint8);
+ser_primitive_impl(uint16_t, serialize_uint16);
+ser_primitive_impl(uint32_t, serialize_uint32);
+ser_primitive_impl(uint64_t, serialize_uint64);
 
-primitive_impl(float, JsonNumber, serialize_float);
-primitive_impl(double, JsonNumber, serialize_double);
+ser_primitive_impl(float, serialize_float);
+ser_primitive_impl(double, serialize_double);
 
-primitive_impl(char, JsonString, serialize_char);
+ser_primitive_impl(char, serialize_char);
 
 SerResult serialize_bool(Serializer *self, bool v) {
     char buffer[BUFSIZ];
@@ -58,9 +58,16 @@ SerResult serialize_bool(Serializer *self, bool v) {
     return Ok(SerResult, {});
 }
 
-SerResult serialize_str(Serializer *self, char *v) {
+SerResult serialize_cstr(Serializer *self, char *v) {
     char buffer[BUFSIZ];
     sprintf(buffer, "\"%s\"", v);
+    String_append_slice(&self->output, buffer);
+    return Ok(SerResult, {});
+}
+
+SerResult serialize_str(Serializer *self, str v) {
+    char buffer[BUFSIZ];
+    sprintf(buffer, "\"%.*s\"", v.size, v.body);
     String_append_slice(&self->output, buffer);
     return Ok(SerResult, {});
 }
@@ -110,10 +117,15 @@ ResChar next_char(Deserializer *self) {
 }
 
 ResBool parse_bool(Deserializer *self) {
-    if (strstr(self->input, "true") == self->input) {
+    char ch;
+    do
+        TRY(ResBool, next_char(self), ch)
+    while (isspace(ch));
+
+    if (strncmp(self->input - 1, "true", 4) == 0) {
         self->input = self->input + strlen("true");
         return Ok(ResBool, true);
-    } else if (strstr(self->input, "false") == self->input) {
+    } else if (strncmp(self->input - 1, "false", 5) == 0) {
         self->input = self->input + strlen("false");
         return Ok(ResBool, false);
     }
@@ -150,6 +162,7 @@ ResInt parse_signed(Deserializer *self) {
         return Err(ResInt, Error("Expected integer"));
     }
     int64_t res;
+    if (ch != '-') self->input--;
     TRY(ResInt, parse_unsigned(self), res);
     if (ch == '-') res = -res;
     return Ok(ResInt, res);
@@ -171,4 +184,32 @@ ResStr parse_str(Deserializer *self) {
     str res = {self->input, end - self->input};
     self->input = end + 1;
     return Ok(ResStr, res);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+#define de_primitive_impl(T, parse_method)                     \
+    DeResult deserialize_##T(Deserializer *self, T *visitor) { \
+        TRY(DeResult, parse_method(self), *visitor);           \
+        return Ok(DeResult, {});                               \
+    }
+
+de_primitive_impl(bool, parse_bool);
+de_primitive_impl(uint8_t, parse_unsigned);
+de_primitive_impl(uint16_t, parse_unsigned);
+de_primitive_impl(uint32_t, parse_unsigned);
+de_primitive_impl(uint64_t, parse_unsigned);
+de_primitive_impl(int8_t, parse_signed);
+de_primitive_impl(int16_t, parse_signed);
+de_primitive_impl(int32_t, parse_signed);
+de_primitive_impl(int64_t, parse_signed);
+de_primitive_impl(str, parse_str);
+de_primitive_impl(char, next_char);
+
+DeResult deserialize_default(Deserializer *self, void *visitor) {
+    struct void_struct {
+        SerResult (*ser)(Serializer *, struct void_struct *);
+        DeResult (*de)(Deserializer *, struct void_struct *);
+    } *value = visitor;
+    return value->de(self, visitor);
 }
